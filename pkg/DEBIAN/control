@@ -1,0 +1,6 @@
+Package: microwall
+Version: 0.1.0
+Architecture: amd64
+Depends: ufw, iproute2
+Maintainer: splxs <m.mukhlishasri@gmail.com>
+Description: Terminal UI for ufw that also shows ports in use
