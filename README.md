@@ -4,7 +4,25 @@ A terminal UI for the [ufw](https://launchpad.net/ufw) firewall that also shows
 which ports are in use (via `ss`), written in Go with
 [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
-## Run
+## Install
+
+On Debian, Ubuntu or another apt-based system (amd64), install the package
+from the `release` folder:
+
+```sh
+sudo apt install ./release/microwall_0.1.0_amd64.deb
+sudo microwall
+```
+
+To rebuild the package after changing the code:
+
+```sh
+CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=0.1.0" -o microwall .
+mkdir -p pkg/usr/bin && cp microwall pkg/usr/bin/
+dpkg-deb --build --root-owner-group pkg release/microwall_0.1.0_amd64.deb
+```
+
+## Run from source
 
 ```sh
 CGO_ENABLED=0 go build -o microwall .

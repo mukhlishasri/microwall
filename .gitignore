@@ -1,3 +1,4 @@
 /microwall
 *.deb
+!/release/*.deb
 /pkg/usr/
