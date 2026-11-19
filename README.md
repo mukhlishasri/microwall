@@ -10,16 +10,16 @@ On Debian, Ubuntu or another apt-based system (amd64), install the package
 from the `release` folder:
 
 ```sh
-sudo apt install ./release/microwall_0.2.1_amd64.deb
+sudo apt install ./release/microwall_0.2.2_amd64.deb
 sudo microwall
 ```
 
 To rebuild the package after changing the code:
 
 ```sh
-CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=0.2.1" -o microwall .
+CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=0.2.2" -o microwall .
 mkdir -p pkg/usr/bin && cp microwall pkg/usr/bin/
-dpkg-deb --build --root-owner-group pkg release/microwall_0.2.1_amd64.deb
+dpkg-deb --build --root-owner-group pkg release/microwall_0.2.2_amd64.deb
 ```
 
 ## Run from source
@@ -61,6 +61,9 @@ is confirmed to be in place. A rule
 that ufw created for both IPv4 and IPv6 is edited as a pair. Editing needs the
 firewall to be active, and does not cover routed rules, application profiles,
 or rules with a source port or logging options.
+
+On quit, microwall clears the screen and prints the total number of rules and
+how many rules were edited during the session.
 
 The **Ports in use** tab lists listening sockets (from `ss -tulnp`) with the
 owning process and an estimate of how the firewall treats each port: the first

@@ -47,8 +47,21 @@ func main() {
 		fw = cli
 	}
 
-	if _, err := tea.NewProgram(tui.New(fw, lister, *demo), tea.WithAltScreen()).Run(); err != nil {
+	final, err := tea.NewProgram(tui.New(fw, lister, *demo), tea.WithAltScreen()).Run()
+	if err != nil {
 		fatal(err)
+	}
+
+	// On exit, clear the screen and leave only a short summary.
+	fmt.Print("\033[H\033[2J")
+	if m, ok := final.(tui.Model); ok {
+		rules, edited, loaded := m.Summary()
+		if loaded {
+			fmt.Printf("Total rules:  %d\n", rules)
+		} else {
+			fmt.Println("Total rules:  unknown")
+		}
+		fmt.Printf("Rules edited: %d\n", edited)
 	}
 }
 

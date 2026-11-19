@@ -33,8 +33,9 @@ type statusMsg struct {
 }
 
 type opMsg struct {
-	ok  string
-	err error
+	ok     string
+	err    error
+	edited bool // the change was an edit of an existing rule
 }
 
 // confirm is a yes/no dialog guarding a change.
@@ -80,6 +81,8 @@ type Model struct {
 	editOld  ufw.Rule
 	editTwin *ufw.Rule
 
+	edited int // rules successfully edited this session
+
 	notice    string
 	noticeErr bool
 }
@@ -93,6 +96,12 @@ func New(fw ufw.Firewall, lister ports.Lister, demo bool) Model {
 }
 
 func (m Model) Init() tea.Cmd { return m.refresh() }
+
+// Summary reports the state at exit: how many rules the firewall has (ok is
+// false if the list never loaded) and how many were edited this session.
+func (m Model) Summary() (rules, edited int, ok bool) {
+	return len(m.status.Rules), m.edited, m.loaded
+}
 
 func (m Model) refresh() tea.Cmd {
 	fw, lister := m.fw, m.lister
@@ -210,6 +219,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice, m.noticeErr = oneLine(msg.err.Error()), true
 		} else {
 			m.notice, m.noticeErr = msg.ok, false
+			if msg.edited {
+				m.edited++
+			}
 		}
 		return m, m.refresh()
 
@@ -435,9 +447,11 @@ func (m Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				how = "ufw updates the rule in place."
 			}
 			c := confirm{
-				title:  "Change this rule?",
-				lines:  []string{describe(old)},
-				action: op("Rule updated: "+spec.CommandLine(), func() error { return ufw.Replace(fw, old, twin, spec) }),
+				title: "Change this rule?",
+				lines: []string{describe(old)},
+				action: func() tea.Msg {
+					return opMsg{ok: "Rule updated: " + spec.CommandLine(), err: ufw.Replace(fw, old, twin, spec), edited: true}
+				},
 			}
 			if twin != nil {
 				c.lines = append(c.lines, describe(*twin))
