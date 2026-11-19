@@ -154,7 +154,7 @@ func TestDemo(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, _ = d.Status()
-	if len(st.Rules) != n+2 || st.Rules[0].To != "53/udp" || st.Rules[1].Num != 2 || st.Rules[n+1].To != "53/udp (v6)" {
+	if len(st.Rules) != n+2 || st.Rules[0].To != "53/udp" || st.Rules[1].Num != 2 || st.Rules[6].To != "53/udp (v6)" {
 		t.Fatalf("got %+v", st.Rules[:2])
 	}
 	if err := d.Delete(st.Rules[0]); err != nil {
@@ -255,8 +255,8 @@ func TestReplace(t *testing.T) {
 		"5432/tcp ALLOW 10.0.0.0/24 #postgres from lan",
 		"Anywhere DENY 203.0.113.7",
 		"25/tcp REJECT Anywhere #no outbound smtp",
-		"80,443/tcp (v6) ALLOW Anywhere (v6) #web",
 		"2222/tcp (v6) LIMIT Anywhere (v6) #ssh",
+		"80,443/tcp (v6) ALLOW Anywhere (v6) #web",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("after port change:\n got %q\nwant %q", got, want)
@@ -280,10 +280,14 @@ func TestReplace(t *testing.T) {
 	if err := Replace(d, old, &tw, spec); err != ErrNoChange {
 		t.Fatalf("unchanged: got %v", err)
 	}
-	// Changing it into a rule that already exists also removes nothing.
-	spec.Port, spec.Action, spec.Comment = "2222", "limit", "ssh"
-	if err := Replace(d, old, &tw, spec); err != ErrNoChange {
-		t.Fatalf("duplicate: got %v", err)
+	// Changing it into a rule another rule already covers is refused, and
+	// neither rule is touched (ufw would silently rewrite the other one).
+	spec.Port, spec.Action = "2222", "deny"
+	if err := Replace(d, old, &tw, spec); err == nil || !strings.Contains(err.Error(), "rule 1 already covers") {
+		t.Fatalf("conflict: got %v", err)
+	}
+	if got := summary(t, d); got[0] != "2222/tcp LIMIT Anywhere #ssh" {
+		t.Fatalf("conflict changed rule 1: %q", got)
 	}
 	if got := summary(t, d); len(got) != 7 || got[1] != "80,443/tcp ALLOW Anywhere #web" {
 		t.Fatalf("after no-ops: %q", got)
@@ -295,12 +299,42 @@ func TestReplace(t *testing.T) {
 	if err := Replace(d, old, &tw, spec); err != nil {
 		t.Fatal(err)
 	}
-	if got := summary(t, d); len(got) != 7 || got[1] != "80,443/tcp ALLOW Anywhere #public web" || got[5] != "80,443/tcp (v6) ALLOW Anywhere (v6) #public web" {
+	if got := summary(t, d); len(got) != 7 || got[1] != "80,443/tcp ALLOW Anywhere #public web" || got[6] != "80,443/tcp (v6) ALLOW Anywhere (v6) #public web" {
 		t.Fatalf("after comment change: %q", got)
+	}
+
+	// An action-only edit (allow -> reject) updates both families in place.
+	// ufw refuses to "insert" such a rule, so this must not use a position.
+	old = get(2)
+	tw, _ = Twin(rules(), old)
+	spec, _ = SpecFromRule(old, true)
+	spec.Action = "reject"
+	spec.Position = "2" // what the edit form pre-fills
+	if !InPlace(old, true, spec) {
+		t.Fatal("want in-place")
+	}
+	if err := Replace(d, old, &tw, spec); err != nil {
+		t.Fatal(err)
+	}
+	if got := summary(t, d); len(got) != 7 || got[1] != "80,443/tcp REJECT Anywhere #public web" || got[6] != "80,443/tcp (v6) REJECT Anywhere (v6) #public web" {
+		t.Fatalf("after action change: %q", got)
+	}
+
+	// Narrowing a pair to IPv4 only drops the IPv6 rule.
+	old = get(2)
+	tw, _ = Twin(rules(), old)
+	spec, _ = SpecFromRule(old, true)
+	spec.From = "0.0.0.0/0"
+	if err := Replace(d, old, &tw, spec); err != nil {
+		t.Fatal(err)
+	}
+	if got := summary(t, d); len(got) != 6 || got[1] != "80,443/tcp REJECT Anywhere #public web" || got[5] != "2222/tcp (v6) LIMIT Anywhere (v6) #ssh" {
+		t.Fatalf("after narrowing: %q", got)
 	}
 
 	// A stale rule (list changed underneath) is refused.
 	stale := old
+	stale.Comment = "as it was before someone else changed it"
 	if err := Replace(d, stale, nil, spec); err == nil || !strings.Contains(err.Error(), "rules changed") {
 		t.Fatalf("stale: got %v", err)
 	}
@@ -312,7 +346,7 @@ func TestReplace(t *testing.T) {
 	if err := Replace(d, old, nil, spec); err == nil {
 		t.Fatal("want error for bad position")
 	}
-	if got := summary(t, d); len(got) != 7 || got[3] != "Anywhere DENY 203.0.113.7" {
+	if got := summary(t, d); len(got) != 6 || got[3] != "Anywhere DENY 203.0.113.7" {
 		t.Fatalf("after failed add: %q", got)
 	}
 }

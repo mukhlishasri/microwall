@@ -108,35 +108,47 @@ func (d *Demo) Add(s RuleSpec) error {
 			return errors.New("Invalid position '" + s.Position + "'")
 		}
 	}
-	// put adds r at index at, unless the rule exists already.
-	put := func(r Rule, at int) bool {
+	// put mimics ufw's backend. A rule matching an existing one in everything
+	// but action and comment is "the same rule": with a position ufw skips it,
+	// without one ufw updates the existing rule in place.
+	put := func(r Rule, at int, positioned bool) bool {
 		for i, c := range d.st.Rules {
-			if c.To == r.To && c.Action == r.Action && c.Dir == r.Dir && c.From == r.From {
-				d.st.Rules[i].Comment = r.Comment
+			if c.To == r.To && c.Dir == r.Dir && c.From == r.From {
+				if !positioned {
+					d.st.Rules[i].Action, d.st.Rules[i].Comment = r.Action, r.Comment
+				}
 				return false
 			}
 		}
 		d.st.Rules = append(d.st.Rules[:at], append([]Rule{r}, d.st.Rules[at:]...)...)
 		return true
 	}
-	if want4 {
-		at := n4 // end of the IPv4 rules
-		if pos >= 1 && pos <= n4 {
-			at = pos - 1
-		}
-		if put(base, at) {
-			n4++
-			if pos > n4-1 {
-				pos++ // the IPv6 position moved down by one
+	// With a position in the IPv4 rules, ufw puts the IPv6 half before the
+	// IPv6 twin of the rule at that position, or at the end if it has none.
+	at6, positioned6 := len(d.st.Rules), pos > n4
+	if positioned6 {
+		at6 = pos - 1
+	} else if pos >= 1 {
+		if twin, ok := Twin(d.st.Rules, d.st.Rules[pos-1]); ok {
+			for i, c := range d.st.Rules {
+				if c == twin {
+					at6, positioned6 = i, true
+				}
 			}
 		}
 	}
-	if want6 {
-		at := len(d.st.Rules)
-		if pos > n4 {
+	if want4 {
+		at := n4 // end of the IPv4 rules
+		positioned := pos >= 1 && pos <= n4
+		if positioned {
 			at = pos - 1
 		}
-		put(v6, at)
+		if put(base, at, positioned) {
+			at6++ // everything after the IPv4 rules moved down by one
+		}
+	}
+	if want6 {
+		put(v6, at6, positioned6)
 	}
 	return nil
 }

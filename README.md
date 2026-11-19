@@ -10,16 +10,16 @@ On Debian, Ubuntu or another apt-based system (amd64), install the package
 from the `release` folder:
 
 ```sh
-sudo apt install ./release/microwall_0.2.0_amd64.deb
+sudo apt install ./release/microwall_0.2.1_amd64.deb
 sudo microwall
 ```
 
 To rebuild the package after changing the code:
 
 ```sh
-CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=0.2.0" -o microwall .
+CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=0.2.1" -o microwall .
 mkdir -p pkg/usr/bin && cp microwall pkg/usr/bin/
-dpkg-deb --build --root-owner-group pkg release/microwall_0.2.0_amd64.deb
+dpkg-deb --build --root-owner-group pkg release/microwall_0.2.1_amd64.deb
 ```
 
 ## Run from source
@@ -54,8 +54,10 @@ Every change shows the `ufw` command it will run and asks for confirmation.
 Enabling the firewall or tightening the incoming policy warns when no rule
 appears to allow SSH.
 
-ufw has no edit command, so editing adds the new rule at the same position and
-removes the old one only after the new rule is confirmed to be in place. A rule
+ufw has no edit command. Changing only the action or comment re-adds the rule,
+which ufw applies as an in-place update. Any other change adds the new rule at
+the same position and then removes the old one automatically, once the new rule
+is confirmed to be in place. A rule
 that ufw created for both IPv4 and IPv6 is edited as a pair. Editing needs the
 firewall to be active, and does not cover routed rules, application profiles,
 or rules with a source port or logging options.

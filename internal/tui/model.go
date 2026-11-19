@@ -427,15 +427,22 @@ func (m Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		fw := m.fw
 		if m.editing {
 			old, twin := m.editOld, m.editTwin
+			// Changing only the action or comment is an in-place update in
+			// ufw, without a position; anything else is add-then-remove.
+			how := "The old rule is then removed automatically."
+			if ufw.InPlace(old, twin != nil, spec) {
+				spec.Position = ""
+				how = "ufw updates the rule in place."
+			}
 			c := confirm{
-				title:  "Replace this rule?",
+				title:  "Change this rule?",
 				lines:  []string{describe(old)},
 				action: op("Rule updated: "+spec.CommandLine(), func() error { return ufw.Replace(fw, old, twin, spec) }),
 			}
 			if twin != nil {
 				c.lines = append(c.lines, describe(*twin))
 			}
-			c.lines = append(c.lines, "", "Runs: "+spec.CommandLine(), "The old rule is removed only after the new one is in place.")
+			c.lines = append(c.lines, "", "Runs: "+spec.CommandLine(), how)
 			if (Model{status: ufw.Status{Rules: []ufw.Rule{old}}}).allowsSSH() {
 				c.danger = true
 				c.lines = append(c.lines, "", "This rule appears to allow SSH.", "Check that the new rule still lets you in.")

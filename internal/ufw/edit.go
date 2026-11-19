@@ -9,7 +9,7 @@ import (
 )
 
 // ErrNoChange is returned by Replace when ufw already has the requested rule.
-var ErrNoChange = errors.New("no change: that rule already exists (to move a rule, delete it and insert it again)")
+var ErrNoChange = errors.New("no change: the rule is already like that")
 
 var portSpecRe = regexp.MustCompile(`^[0-9]+([,:][0-9]+)*$`)
 
@@ -137,10 +137,73 @@ func find(rules []Rule, r Rule) (Rule, bool) {
 	return Rule{}, false
 }
 
-// Replace swaps old for the rule described by spec. ufw has no edit command,
-// so this adds the new rule first and removes the old one only once the new
-// rule is confirmed to be in place; if adding fails, nothing has changed.
-// twin, if not nil, is old's other-family twin and is removed as well.
+// matchKey is what ufw uses to decide whether two rules are "the same rule":
+// everything except the action and the comment.
+func matchKey(s RuleSpec) string {
+	norm := func(addr string) string {
+		if isAny(addr) || addr == "0.0.0.0/0" || addr == "::/0" {
+			return "any"
+		}
+		return addr
+	}
+	proto := s.Proto
+	if proto == "" {
+		proto = "any"
+	}
+	return strings.Join([]string{s.Direction, s.Interface, proto, s.Port, norm(s.From), norm(s.To)}, "|")
+}
+
+// families reports which IP families a spec applies to.
+func families(s RuleSpec) (v4, v6 bool) {
+	addrs := s.From + " " + s.To
+	return !strings.Contains(addrs, ":"), !strings.Contains(addrs, ".")
+}
+
+// InPlace reports whether changing old into spec only changes the action or
+// comment. ufw then updates the existing rule where it is, and refuses an
+// "insert" of it, so no position is used.
+func InPlace(old Rule, hasTwin bool, spec RuleSpec) bool {
+	oldSpec, err := SpecFromRule(old, hasTwin)
+	return err == nil && matchKey(oldSpec) == matchKey(spec)
+}
+
+func sameRules(a, b []Rule) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !sameRule(a[i], b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func deleteByContent(fw Firewall, target Rule) error {
+	st, err := fw.Status()
+	if err != nil {
+		return err
+	}
+	cur, ok := find(st.Rules, target)
+	if !ok {
+		return errors.New("the new rule is in place, but the old one could not be found to remove; check the list")
+	}
+	if err := fw.Delete(cur); err != nil {
+		return fmt.Errorf("the new rule is in place, but removing the old one failed: %w", err)
+	}
+	return nil
+}
+
+// Replace changes old into the rule described by spec. ufw has no edit
+// command, so there are two cases:
+//
+//   - Only the action or comment changes: ufw updates the rule in place when
+//     it is added again without a position.
+//   - Anything else changes: the new rule is inserted at the old position,
+//     and the old one is removed only once the new rule is confirmed to be
+//     there. If adding fails, nothing has changed.
+//
+// twin, if not nil, is old's other-family twin and is replaced as well.
 func Replace(fw Firewall, old Rule, twin *Rule, spec RuleSpec) error {
 	if err := spec.Validate(); err != nil {
 		return err
@@ -154,10 +217,55 @@ func Replace(fw Firewall, old Rule, twin *Rule, spec RuleSpec) error {
 	if cur, ok := find(before.Rules, old); !ok || cur.Num != old.Num {
 		return errors.New("rules changed since the list was loaded; nothing changed, list refreshed")
 	}
+	oldSpec, err := SpecFromRule(old, twin != nil)
+	if err != nil {
+		return err
+	}
+	new4, new6 := families(spec)
+
+	if matchKey(oldSpec) == matchKey(spec) {
+		spec.Position = ""
+		if err := fw.Add(spec); err != nil {
+			return err
+		}
+		// Narrowed from both families to one: drop the other family's rule.
+		if twin != nil && new4 != new6 {
+			drop := *twin
+			if old.V6 != new6 {
+				drop = old
+			}
+			if err := deleteByContent(fw, drop); err != nil {
+				return err
+			}
+		}
+		after, err := fw.Status()
+		if err != nil {
+			return err
+		}
+		if sameRules(before.Rules, after.Rules) {
+			return ErrNoChange
+		}
+		return nil
+	}
+
+	// ufw would skip the insert, or silently change another rule's action,
+	// if a different rule already matches the new one. Refuse instead.
+	for _, r := range before.Rules {
+		if sameRule(r, old) || (twin != nil && sameRule(r, *twin)) {
+			continue
+		}
+		other, err := SpecFromRule(r, true)
+		if err != nil || matchKey(other) != matchKey(spec) {
+			continue
+		}
+		if (r.V6 && new6) || (!r.V6 && new4) {
+			return fmt.Errorf("rule %d already covers that port and address; edit or delete that rule instead", r.Num)
+		}
+	}
+
 	if spec.Position == "" {
 		spec.Position = strconv.Itoa(old.Num)
 	}
-
 	if err := fw.Add(spec); err != nil {
 		return err
 	}
@@ -166,30 +274,13 @@ func Replace(fw Firewall, old Rule, twin *Rule, spec RuleSpec) error {
 		return err
 	}
 	if len(after.Rules) <= len(before.Rules) {
-		// ufw added nothing. Either the rule already existed, or only the
-		// comment differed and ufw updated it in place.
-		if _, still := find(after.Rules, old); still {
-			return ErrNoChange
-		}
-		return nil
+		return errors.New("ufw did not add the new rule, so the old one was kept")
 	}
-
-	targets := []Rule{old}
+	if err := deleteByContent(fw, old); err != nil {
+		return err
+	}
 	if twin != nil {
-		targets = append(targets, *twin)
-	}
-	for _, target := range targets {
-		st, err := fw.Status()
-		if err != nil {
-			return err
-		}
-		cur, ok := find(st.Rules, target)
-		if !ok {
-			return errors.New("the new rule was added, but the old one could not be found to remove; check the list")
-		}
-		if err := fw.Delete(cur); err != nil {
-			return fmt.Errorf("the new rule was added, but removing the old one failed: %w", err)
-		}
+		return deleteByContent(fw, *twin)
 	}
 	return nil
 }

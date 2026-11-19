@@ -178,7 +178,7 @@ func (m Model) confirmView() string {
 	var b strings.Builder
 	b.WriteString(title.Render(c.title) + "\n\n")
 	for _, l := range c.lines {
-		if c.danger && !strings.HasPrefix(l, "Runs:") && !strings.HasPrefix(l, "[") && !strings.HasPrefix(l, "The old rule") {
+		if c.danger && !strings.HasPrefix(l, "Runs:") && !strings.HasPrefix(l, "[") && !strings.HasPrefix(l, "The old rule") && !strings.HasPrefix(l, "ufw updates") {
 			l = warnStyle.Render(l)
 		}
 		b.WriteString(l + "\n")
