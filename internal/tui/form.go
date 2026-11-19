@@ -42,6 +42,8 @@ type form struct {
 	fields []field
 	focus  int
 	err    string
+	title  string // overrides the default "Add rule" / "Insert rule"
+	note   string // shown under the title
 }
 
 func choiceField(label string, choices []string) field {
@@ -86,6 +88,32 @@ func (f *form) prefill(port int, proto string) {
 			f.fields[fProto].sel = i
 		}
 	}
+}
+
+// load fills the form from an existing rule, for editing.
+func (f *form) load(s ufw.RuleSpec) {
+	choose := func(i int, val string) {
+		for j, c := range f.fields[i].choices {
+			if c == val {
+				f.fields[i].sel = j
+			}
+		}
+	}
+	text := func(i int, val string) {
+		if val == "any" {
+			val = ""
+		}
+		f.fields[i].input.SetValue(val)
+		f.fields[i].input.CursorEnd()
+	}
+	choose(fAction, s.Action)
+	choose(fDirection, s.Direction)
+	choose(fProto, s.Proto)
+	text(fPort, s.Port)
+	text(fFrom, s.From)
+	text(fTo, s.To)
+	text(fInterface, s.Interface)
+	text(fComment, s.Comment)
 }
 
 func (f *form) spec() ufw.RuleSpec {
@@ -153,7 +181,14 @@ func (f form) view() string {
 	if f.fields[fPosition].value() != "" {
 		title = "Insert rule"
 	}
-	b.WriteString(titleStyle.Render(title) + "\n\n")
+	if f.title != "" {
+		title = f.title
+	}
+	b.WriteString(titleStyle.Render(title) + "\n")
+	if f.note != "" {
+		b.WriteString(dimStyle.Render(f.note) + "\n")
+	}
+	b.WriteString("\n")
 
 	for i, fl := range f.fields {
 		focused := i == f.focus

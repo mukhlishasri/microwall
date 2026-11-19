@@ -75,6 +75,11 @@ type Model struct {
 	confirm confirm
 	menu    menu
 
+	// Set while the form is editing an existing rule instead of adding one.
+	editing  bool
+	editOld  ufw.Rule
+	editTwin *ufw.Rule
+
 	notice    string
 	noticeErr bool
 }
@@ -290,6 +295,7 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.refresh()
 
 	case "a":
+		m.editing = false
 		m.form = newForm("")
 		if l, ok := m.selectedPort(); ok && m.tab == tabPorts {
 			m.form.prefill(l.Port, l.Proto)
@@ -307,7 +313,38 @@ func (m Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.notice, m.noticeErr = "Insert needs a numbered rule selected (the firewall must be active)", true
 			return m, nil
 		}
+		m.editing = false
 		m.form = newForm(fmt.Sprint(r.Num))
+		m.mode = modeForm
+		return m, textinput.Blink
+
+	case "enter":
+		if m.tab == tabPorts {
+			m.notice, m.noticeErr = "Edit works on the Rules tab. Press a to add a rule for this port.", true
+			return m, nil
+		}
+		r, ok := m.selected()
+		if !ok {
+			return m, nil
+		}
+		twin, hasTwin := ufw.Twin(m.status.Rules, r)
+		spec, err := ufw.SpecFromRule(r, hasTwin)
+		if err != nil {
+			m.notice, m.noticeErr = "Can't edit this rule: "+err.Error(), true
+			return m, nil
+		}
+		m.form = newForm(fmt.Sprint(r.Num))
+		m.form.load(spec)
+		m.form.title = fmt.Sprintf("Edit rule %d", r.Num)
+		m.editing, m.editOld, m.editTwin = true, r, nil
+		if hasTwin {
+			m.editTwin = &twin
+			family := "IPv6"
+			if r.V6 {
+				family = "IPv4"
+			}
+			m.form.note = fmt.Sprintf("Also replaces its %s twin, rule %d.", family, twin.Num)
+		}
 		m.mode = modeForm
 		return m, textinput.Blink
 
@@ -388,6 +425,25 @@ func (m Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		fw := m.fw
+		if m.editing {
+			old, twin := m.editOld, m.editTwin
+			c := confirm{
+				title:  "Replace this rule?",
+				lines:  []string{describe(old)},
+				action: op("Rule updated: "+spec.CommandLine(), func() error { return ufw.Replace(fw, old, twin, spec) }),
+			}
+			if twin != nil {
+				c.lines = append(c.lines, describe(*twin))
+			}
+			c.lines = append(c.lines, "", "Runs: "+spec.CommandLine(), "The old rule is removed only after the new one is in place.")
+			if (Model{status: ufw.Status{Rules: []ufw.Rule{old}}}).allowsSSH() {
+				c.danger = true
+				c.lines = append(c.lines, "", "This rule appears to allow SSH.", "Check that the new rule still lets you in.")
+			}
+			m.confirm = c
+			m.mode = modeConfirm
+			return m, nil
+		}
 		return m, m.start(op("Added: "+spec.CommandLine(), func() error { return fw.Add(spec) }))
 	}
 	return m, m.form.update(msg)

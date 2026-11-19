@@ -163,7 +163,7 @@ func (m Model) footerView() string {
 		if m.tab == tabPorts {
 			keys = hints("tab", "rules", "a", "add rule for port", "e", toggle, "p", "policy", "/", "filter", "r", "refresh", "?", "help", "q", "quit")
 		} else {
-			keys = hints("tab", "ports", "a", "add", "i", "insert", "d", "delete", "e", toggle, "p", "policy", "l", "logging", "/", "filter", "?", "help", "q", "quit")
+			keys = hints("tab", "ports", "a", "add", "enter", "edit", "i", "insert", "d", "delete", "e", toggle, "p", "policy", "/", "filter", "?", "help", "q", "quit")
 		}
 	}
 	return trunc(line1, m.width) + "\n" + trunc(" "+keys, m.width)
@@ -178,7 +178,7 @@ func (m Model) confirmView() string {
 	var b strings.Builder
 	b.WriteString(title.Render(c.title) + "\n\n")
 	for _, l := range c.lines {
-		if c.danger && !strings.HasPrefix(l, "Runs:") && !strings.HasPrefix(l, "[") {
+		if c.danger && !strings.HasPrefix(l, "Runs:") && !strings.HasPrefix(l, "[") && !strings.HasPrefix(l, "The old rule") {
 			l = warnStyle.Render(l)
 		}
 		b.WriteString(l + "\n")
@@ -211,6 +211,7 @@ func helpView() string {
 		{"g / G", "first / last rule"},
 		{"pgup pgdn", "page up / down"},
 		{"a", "add a rule (pre-filled from the selected port)"},
+		{"enter", "edit the selected rule"},
 		{"i", "insert a rule before the selected one"},
 		{"d", "delete the selected rule"},
 		{"e", "enable / disable the firewall"},
